@@ -1,6 +1,8 @@
 ******************************************************************
 ICECREAM PROGRAM IN JAVA
 ******************************************************************
+//a code in java of icecream program
+
 import java.io.*; 
 import java.util.Scanner;
 
