@@ -1,5 +1,4 @@
 package org.example;
-
 import org.apache.poi.ss.usermodel.*;
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
@@ -10,8 +9,8 @@ import java.io.*;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 public class Main {
+
     public static void main(String[] args) {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         System.out.println("Enter the file path: ");
@@ -44,7 +43,17 @@ public class Main {
                     System.err.println("Error reading PDF: " + e.getMessage());
                 }
             } else if (extension.matches("\\.(xlsx|xls)")) {
-                extractFromExcel(filePath);
+                Map<String, String> testResults = extractFromExcel(filePath);
+                System.out.println("\nFinal Extracted Test Results from PDF:");
+                for (Map.Entry<String, String> entry : testResults.entrySet()) {
+                    System.out.println(entry.getKey() + ": " + entry.getValue());
+                }
+            } else if (extension.equals(".csv")) {
+                Map<String, String> testResults = extractFromCSV(filePath);
+                System.out.println("\nFinal Extracted Test Results from PDF:");
+                for (Map.Entry<String, String> entry : testResults.entrySet()) {
+                    System.out.println(entry.getKey() + ": " + entry.getValue());
+                }
             } else {
                 System.out.println("Unsupported file type.");
                 return;
@@ -139,12 +148,13 @@ public class Main {
     }
 
     // Extracts kidney test results from an Excel file
-    public static void extractFromExcel(String filePath) {
+    public static Map<String, String> extractFromExcel(String filePath) {
+        Map<String, String> results = new LinkedHashMap<>();
+
         try (FileInputStream fis = new FileInputStream(filePath);
              Workbook workbook = WorkbookFactory.create(fis)) {
 
             Sheet sheet = workbook.getSheetAt(0); // Assuming data is in the first sheet
-            Map<String, String> results = new LinkedHashMap<>();
 
             for (Row row : sheet) {
                 for (Cell cell : row) {
@@ -164,15 +174,11 @@ public class Main {
                     }
                 }
             }
-
-            System.out.println("\nExtracted Test Results from Excel:");
-            for (Map.Entry<String, String> entry : results.entrySet()) {
-                System.out.println(entry.getKey() + ": " + entry.getValue());
-            }
-
         } catch (IOException e) {
             System.err.println("Error reading Excel file: " + e.getMessage());
         }
+
+        return results; // Return the extracted results
     }
 
     private static String getNextValue(Row row, int columnIndex) {
@@ -186,4 +192,38 @@ public class Main {
         }
         return "Value not found";
     }
+
+
+    public static Map<String, String> extractFromCSV(String filePath) {
+        Map<String, String> kidneyTestResults = new LinkedHashMap<>();
+        List<String> kidneyTests = Arrays.asList("creatinine", "bun", "gfr", "uacr", "sodium", "potassium");
+
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            String line;
+
+            while ((line = br.readLine()) != null) { // Read each row
+                String[] values = line.split(",");
+
+                if (values.length >= 2) { // Ensure at least two columns
+                    String testName = values[0].trim().toLowerCase();
+                    String testResult = values[1].trim();
+
+                    for (String kidneyTest : kidneyTests) {
+                        if (testName.contains(kidneyTest)) {
+                            kidneyTestResults.put(testName, testResult);
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error reading CSV file: " + e.getMessage());
+        }
+
+        return kidneyTestResults;
+    }
+
+
+
+
 }
