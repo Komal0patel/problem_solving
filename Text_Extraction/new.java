@@ -4,7 +4,8 @@ import org.apache.poi.ss.usermodel.*;
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
 import com.opencsv.CSVWriter;
-
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import java.io.*;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -70,14 +71,18 @@ public class Main {
 
     // Extracts test results using regex and writes to a CSV file
     public static void extractTestResults(String text) {
-        String regex = "([a-z\\s/()-]*\\b(?:creatinine|sodium|potassium|chloride|electrolytes|blood urea nitrogen|bun|glomerular filtration rate|gfr)\\b[a-z\\s]*)\\s+\\b(\\d{1,3}(?:\\.\\d{1,2})?)\\b";
+        // Updated regex to extract only test name and result (ignores units)
+        String regex = "(?i)\\b(creatinine|serum creatinine|sodium|potassium|chloride|electrolytes|blood urea nitrogen|bun|glomerular filtration rate|gfr|urine albumin-to-creatinine ratio|uacr|albumin creatinine ratio)\\b\\s*[:=-]?\\s*(\\d{1,3}(?:\\.\\d{1,2})?)";
         Pattern pattern = Pattern.compile(regex, Pattern.MULTILINE);
         Matcher matcher = pattern.matcher(text);
 
         try (CSVWriter writer = new CSVWriter(new FileWriter("test_results.csv"))) {
-            writer.writeNext(new String[]{"Test Name", "Result"});
+            writer.writeNext(new String[]{"Test Name", "Result"}); // Only test name & result
             while (matcher.find()) {
-                writer.writeNext(new String[]{matcher.group(1).trim(), matcher.group(2)});
+                String testName = matcher.group(1).trim();
+                String result = matcher.group(2).trim();
+
+                writer.writeNext(new String[]{testName, result});
             }
         } catch (IOException e) {
             System.out.println("Error writing to CSV: " + e.getMessage());
@@ -88,12 +93,14 @@ public class Main {
     private static String extractTextFromPDF(String filePath) throws IOException {
         try (org.apache.pdfbox.pdmodel.PDDocument document = org.apache.pdfbox.pdmodel.PDDocument.load(new File(filePath))) {
             org.apache.pdfbox.text.PDFTextStripper stripper = new org.apache.pdfbox.text.PDFTextStripper();
+            System.out.println(stripper.getText(document).toLowerCase());
             return stripper.getText(document).toLowerCase();
         }
     }
 
     // Extracts test values from PDF text
-    private static Map<String, String> extractTestValues(String text) {
+
+    public static Map<String, String> extractTestValues(String text) {
         Map<String, String> extractedTests = new LinkedHashMap<>();
         Map<String, List<String>> requiredTests = new HashMap<>();
 
@@ -101,19 +108,27 @@ public class Main {
         requiredTests.put("bun", Arrays.asList("bun", "blood urea nitrogen"));
         requiredTests.put("sodium", Arrays.asList("sodium", "serum sodium"));
         requiredTests.put("potassium", Arrays.asList("potassium", "serum potassium"));
-        requiredTests.put("uacr", Arrays.asList("uacr", "urine albumin-to-creatinine ratio"));
+        requiredTests.put("uacr", Arrays.asList("uacr", "urine albumin-to-creatinine ratio", "urine acr", "albumin creatinine ratio", "urine albumin/creatinine"));
 
-        Pattern pattern = Pattern.compile("(\\D+?)\\s+([0-9]+\\.?[0-9]*\\s*(mg/dL|mmol/L|g/L)?)");
+        // Improved regex: Captures variations, ignores case sensitivity
+        Pattern pattern = Pattern.compile("(?i)([A-Za-z /-]+?)[:=]?\\s*([0-9]+\\.?[0-9]*)\\s*(mg/dL|mmol/L|g/L|mg/g|%)?");
         Matcher matcher = pattern.matcher(text);
 
         while (matcher.find()) {
-            String testName = matcher.group(1).trim();
+            String testName = matcher.group(1).trim().toLowerCase();
             String testValue = matcher.group(2).trim();
+            String unit = matcher.group(3) != null ? matcher.group(3) : ""; // Handle missing units
+
+            // Ignore BUN/Creatinine Ratio to avoid incorrect values
+            if (testName.contains("ratio") && !testName.toLowerCase().contains("albumin")) {
+                continue;
+            }
 
             for (Map.Entry<String, List<String>> entry : requiredTests.entrySet()) {
                 for (String alias : entry.getValue()) {
-                    if (testName.contains(alias)) {
-                        extractedTests.put(entry.getKey(), testValue);
+                    // Improved matching: Handles multi-word phrases better
+                    if (testName.replaceAll("[^a-zA-Z]", " ").contains(alias.toLowerCase())) {
+                        extractedTests.put(entry.getKey(), testValue + " " + unit);
                         break;
                     }
                 }
@@ -144,7 +159,7 @@ public class Main {
                         } else if (cellValue.contains("potassium")) {
                             results.put("potassium", getNextValue(row, cell.getColumnIndex()));
                         } else if (cellValue.contains("uacr") || cellValue.contains("urine albumin-to-creatinine ratio")) {
-                           results.put("uacr", getNextValue(row, cell.getColumnIndex()));
+                            results.put("uacr", getNextValue(row, cell.getColumnIndex()));
                         }
                     }
                 }
